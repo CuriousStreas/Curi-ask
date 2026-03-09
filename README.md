@@ -38,10 +38,12 @@ npm run dev
 - 后端：用 gunicorn 等部署 Flask（如 `gunicorn -w 1 -b 0.0.0.0:3001 "app:app"`）。
 - 前端：`npm run build`，将 `dist` 部署到任意静态服务；需让前端请求指向实际后端地址（如环境变量或构建时替换 `API_BASE`）。
 
-## 配置说明
+## 配置说明（backend/.env）
 
-- **AI_API_BASE_URL**：聚合 API 的基础 URL（如 `https://api.openai.com/v1`），需兼容 OpenAI 的 `POST /chat/completions` 格式。
-- **AI_API_KEY**：若聚合站需要鉴权，填密钥。
-- **AI_MODELS**：可选，逗号分隔的模型 id，如 `gpt-4o,gpt-4o-mini`。不填则使用默认列表。
+- **AI_API_BASE_URL**（必填）：聚合 API 基础地址，如 `https://poloapi.top`。无默认值。
+- **AI_API_KEY**（必填）：鉴权密钥，放在请求头 `Authorization: Bearer <key>`。
+- **AI_CHAT_PATH**（可选）：聊天接口路径，默认 `/v1/chat/completions`。最终请求地址 = BASE_URL + AI_CHAT_PATH。若平台需单独追加 `/v1` 或 `/v1/chat/completions`，可在此配置。
+- **AI_MODELS**（可选）：逗号分隔的模型 id，如 `model-a,model-b`。不填则前端模型下拉为空，需在 .env 中配置你实际可用的模型。
+- **PORT**：后端端口，默认 3001。
 
-若你的聚合 API 不是 OpenAI 兼容格式，只需修改 `backend/chat_service.py` 中的 URL 与请求体。
+不同模型的请求方式可参考聚合平台文档（如 Apifox）；Claude 等若支持原生接口，可改 `backend/chat_service.py` 中 URL 与请求体。

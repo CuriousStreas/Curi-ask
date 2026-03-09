@@ -52,6 +52,7 @@
             class="model-select"
             aria-label="选择模型"
           >
+            <option v-if="models.length === 0" value="" disabled>请配置后端 AI_MODELS</option>
             <option v-for="m in models" :key="m.id" :value="m.id">
               {{ m.name || m.id }}
             </option>
@@ -118,7 +119,7 @@
           <button
             type="submit"
             class="send-btn"
-            :disabled="loading || !input.trim()"
+            :disabled="loading || !input.trim() || !model"
             aria-label="发送"
           >
             发送

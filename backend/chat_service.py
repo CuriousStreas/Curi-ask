@@ -1,13 +1,17 @@
 """
-调用 AI 接口（OpenAI 兼容格式）。
-若你的聚合 API 格式不同，只需改本文件中的 URL 与请求体。
+调用聚合 API（OpenAI 兼容格式）。
+鉴权：将密钥放在 Header Authorization: Bearer <key>。
+请求地址 = AI_API_BASE_URL + AI_CHAT_PATH，可由 .env 单独配置。
 """
 import requests
-from config import AI_BASE_URL, AI_API_KEY
+from config import AI_API_BASE_URL, AI_API_KEY, AI_CHAT_PATH
 
 
 def chat_completion(model: str, messages: list) -> dict:
-    url = f"{AI_BASE_URL}/chat/completions"
+    if not AI_API_BASE_URL:
+        raise RuntimeError("未配置 AI_API_BASE_URL，请在 backend/.env 中设置")
+    path = AI_CHAT_PATH if AI_CHAT_PATH.startswith("/") else f"/{AI_CHAT_PATH}"
+    url = f"{AI_API_BASE_URL.rstrip('/')}{path}"
     headers = {"Content-Type": "application/json"}
     if AI_API_KEY:
         headers["Authorization"] = f"Bearer {AI_API_KEY}"
