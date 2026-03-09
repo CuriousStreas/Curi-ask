@@ -1,41 +1,40 @@
 """
-调用聚合 API（OpenAI 兼容格式）。
-鉴权：将密钥放在 Header Authorization: Bearer <key>。
-请求地址 = AI_API_BASE_URL + AI_CHAT_PATH，可由 .env 单独配置。
+聊天服务模块。
+提供统一的聊天接口，自动路由到合适的模型提供商。
 """
-import requests
-from config import AI_API_BASE_URL, AI_API_KEY, AI_CHAT_PATH
+import logging
+from typing import Dict, Any, Generator, List
+
+from providers import get_provider
+
+logger = logging.getLogger(__name__)
 
 
-def chat_completion(model: str, messages: list) -> dict:
-    if not AI_API_BASE_URL:
-        raise RuntimeError("未配置 AI_API_BASE_URL，请在 backend/.env 中设置")
-    path = AI_CHAT_PATH if AI_CHAT_PATH.startswith("/") else f"/{AI_CHAT_PATH}"
-    url = f"{AI_API_BASE_URL.rstrip('/')}{path}"
-    headers = {"Content-Type": "application/json"}
-    if AI_API_KEY:
-        headers["Authorization"] = f"Bearer {AI_API_KEY}"
-    payload = {
-        "model": model,
-        "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
-        "stream": False,
-    }
-    resp = requests.post(url, json=payload, headers=headers, timeout=60)
-    if not resp.ok:
-        err = resp.text
-        try:
-            data = resp.json()
-            err = data.get("error", {}).get("message", data.get("message", err))
-        except Exception:
-            pass
-        raise RuntimeError(f"AI API 错误 {resp.status_code}: {err}")
-    data = resp.json()
-    choice = (data.get("choices") or [None])[0]
-    if not choice:
-        raise RuntimeError("AI 返回格式异常，无 choices")
-    msg = choice.get("message") or {}
-    return {
-        "content": msg.get("content", ""),
-        "role": "assistant",
-        "model": data.get("model") or model,
-    }
+def chat_completion(model: str, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+    """
+    非流式对话（保留兼容）。
+    
+    Args:
+        model: 模型 ID
+        messages: 消息列表
+        
+    Returns:
+        包含 content, role, model 的响应字典
+    """
+    provider = get_provider(model)
+    return provider.chat_completion(model, messages)
+
+
+def chat_completion_stream(model: str, messages: List[Dict[str, str]]) -> Generator[str, None, None]:
+    """
+    流式对话。
+    
+    Args:
+        model: 模型 ID
+        messages: 消息列表
+        
+    Yields:
+        SSE 格式数据
+    """
+    provider = get_provider(model)
+    yield from provider.chat_completion_stream(model, messages)

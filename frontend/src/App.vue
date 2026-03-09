@@ -18,15 +18,28 @@
         + 新对话
       </button>
       <div class="conversation-list">
-        <button
+        <div
           v-for="c in conversations"
           :key="c.id"
-          type="button"
           :class="['conversation-item', { 'conversation-item--active': currentId === c.id }]"
-          @click="selectConversation(c.id)"
         >
-          <span class="conversation-title">{{ c.title }}</span>
-        </button>
+          <button
+            type="button"
+            class="conversation-title-btn"
+            @click="selectConversation(c.id)"
+          >
+            <span class="conversation-title">{{ c.title }}</span>
+          </button>
+          <button
+            type="button"
+            class="conversation-delete-btn"
+            @click.stop="deleteConversation(c.id)"
+            title="删除对话"
+            aria-label="删除对话"
+          >
+            🗑️
+          </button>
+        </div>
         <p v-if="conversations.length === 0" class="conversation-empty">暂无对话</p>
       </div>
     </aside>
@@ -87,13 +100,24 @@
               <div class="block-label">{{ msg.role === 'user' ? '你' : 'AI' }}</div>
               <div class="block-body">
                 <span v-if="msg.model" class="block-model">{{ msg.model }}</span>
-                <div class="block-text">{{ msg.content }}</div>
+                <div 
+                  v-if="msg.role === 'assistant'"
+                  class="block-text markdown-body"
+                  v-html="renderMarkdown(msg.content)"
+                ></div>
+                <div v-else class="block-text">{{ msg.content }}</div>
               </div>
             </article>
             <article v-if="loading" class="block block--assistant">
               <div class="block-label">AI</div>
               <div class="block-body">
-                <div class="block-text block-text--muted">正在回复…</div>
+                <span v-if="streamingModel" class="block-model">{{ streamingModel }}</span>
+                <div 
+                  v-if="streamingContent"
+                  class="block-text markdown-body"
+                  v-html="renderMarkdown(streamingContent)"
+                ></div>
+                <div v-else class="block-text block-text--muted">正在回复…</div>
               </div>
             </article>
           </template>
@@ -101,8 +125,14 @@
       </main>
 
       <div v-if="error" class="toast toast--error">
-        <span>{{ error }}</span>
-        <button type="button" class="toast-close" @click="error = ''">关闭</button>
+        <div class="toast-content">
+          <span class="toast-icon">⚠️</span>
+          <div class="toast-message">
+            <strong>请求失败</strong>
+            <p>{{ error }}</p>
+          </div>
+        </div>
+        <button type="button" class="toast-close" @click="error = ''">×</button>
       </div>
 
       <div class="footer">
@@ -117,9 +147,19 @@
             aria-label="输入消息"
           />
           <button
+            v-if="loading"
+            type="button"
+            class="stop-btn"
+            @click="stopStream"
+            aria-label="停止生成"
+          >
+            ⏹️ 停止
+          </button>
+          <button
+            v-else
             type="submit"
             class="send-btn"
-            :disabled="loading || !input.trim() || !model"
+            :disabled="!input.trim() || !model"
             aria-label="发送"
           >
             发送
@@ -135,15 +175,43 @@
       aria-hidden="true"
       @click="sidebarOpen = false"
     />
+
+    <!-- 删除确认对话框 -->
+    <div v-if="deleteConfirmId" class="modal-overlay" @click="deleteConfirmId = null">
+      <div class="modal" @click.stop>
+        <h3>确认删除</h3>
+        <p>确定要删除这个对话吗？此操作不可撤销。</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-cancel" @click="deleteConfirmId = null">取消</button>
+          <button type="button" class="btn-danger" @click="confirmDelete">删除</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, nextTick } from 'vue';
+import { marked } from 'marked';
+import hljs from 'highlight.js';
 
 const THEME_KEY = 'curi-ask-theme';
 const CONVERSATIONS_KEY = 'curi-ask-conversations';
 const API_BASE = '';
+
+// 配置 marked
+marked.setOptions({
+  highlight: function(code, lang) {
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return hljs.highlight(code, { language: lang }).value;
+      } catch (_) {}
+    }
+    return hljs.highlightAuto(code).value;
+  },
+  breaks: true,
+  gfm: true,
+});
 
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -156,22 +224,21 @@ function getConversationTitle(messages) {
   return t.length > 24 ? t.slice(0, 24) + '…' : t;
 }
 
+function renderMarkdown(content) {
+  if (!content) return '';
+  try {
+    return marked.parse(content);
+  } catch (e) {
+    console.error('Markdown 渲染失败:', e);
+    return content;
+  }
+}
+
 async function getModels() {
   const res = await fetch(`${API_BASE}/api/models`);
   if (!res.ok) throw new Error('获取模型列表失败');
   const data = await res.json();
   return data.models || [];
-}
-
-async function sendChat(model, messages) {
-  const res = await fetch(`${API_BASE}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || '请求失败');
-  return data;
 }
 
 const models = ref([]);
@@ -185,6 +252,12 @@ const theme = ref('dark');
 const conversations = ref([]);
 const currentId = ref(null);
 const sidebarOpen = ref(false);
+const deleteConfirmId = ref(null);
+
+// 流式输出相关
+const streamingContent = ref('');
+const streamingModel = ref('');
+const abortController = ref(null);
 
 const isMobile = ref(false);
 function checkMobile() {
@@ -223,6 +296,28 @@ function selectConversation(id) {
   if (isMobile.value) sidebarOpen.value = false;
 }
 
+function deleteConversation(id) {
+  deleteConfirmId.value = id;
+}
+
+function confirmDelete() {
+  const id = deleteConfirmId.value;
+  if (!id) return;
+  
+  const index = conversations.value.findIndex((x) => x.id === id);
+  if (index !== -1) {
+    conversations.value.splice(index, 1);
+    saveConversations();
+    
+    // 如果删除的是当前对话，清空消息
+    if (currentId.value === id) {
+      currentId.value = null;
+      messages.value = [];
+    }
+  }
+  deleteConfirmId.value = null;
+}
+
 function ensureCurrentConversation() {
   if (currentId.value) {
     const c = conversations.value.find((x) => x.id === currentId.value);
@@ -259,6 +354,135 @@ function toggleTheme() {
   applyTheme(theme.value === 'dark' ? 'light' : 'dark');
 }
 
+function stopStream() {
+  if (abortController.value) {
+    abortController.value.abort();
+    abortController.value = null;
+  }
+  // 如果有流式内容，保存到消息中
+  if (streamingContent.value) {
+    messages.value.push({
+      role: 'assistant',
+      content: streamingContent.value + '\n\n*[已停止生成]*',
+      model: streamingModel.value || model.value,
+    });
+  }
+  streamingContent.value = '';
+  streamingModel.value = '';
+  loading.value = false;
+}
+
+async function handleSubmit() {
+  const text = input.value.trim();
+  if (!text || !model.value || loading.value) return;
+  error.value = '';
+  input.value = '';
+  const userMsg = { role: 'user', content: text };
+  messages.value.push(userMsg);
+  loading.value = true;
+  streamingContent.value = '';
+  streamingModel.value = '';
+  
+  // 创建 AbortController 用于停止流
+  abortController.value = new AbortController();
+  
+  try {
+    const nextMessages = [...messages.value];
+    
+    // 使用流式接口
+    const res = await fetch(`${API_BASE}/api/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: model.value, messages: nextMessages }),
+      signal: abortController.value.signal,
+    });
+    
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || `请求失败 (${res.status})`);
+    }
+    
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const dataStr = line.slice(6);
+          if (dataStr.trim() === '[DONE]') continue;
+          
+          try {
+            const data = JSON.parse(dataStr);
+            
+            if (data.error) {
+              throw new Error(data.error);
+            }
+            
+            if (data.content) {
+              streamingContent.value += data.content;
+            }
+            if (data.model) {
+              streamingModel.value = data.model;
+            }
+            
+            if (data.done) {
+              // 流结束，保存消息
+              messages.value.push({
+                role: 'assistant',
+                content: streamingContent.value,
+                model: streamingModel.value || model.value,
+              });
+              streamingContent.value = '';
+              streamingModel.value = '';
+            }
+            
+            // 滚动到底部
+            await nextTick();
+            if (listRef.value) {
+              listRef.value.scrollTop = listRef.value.scrollHeight;
+            }
+          } catch (e) {
+            if (e.name !== 'SyntaxError') {
+              throw e;
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      // 用户主动停止，不显示错误
+      console.log('流式请求已取消');
+    } else {
+      error.value = e.message;
+      // 如果已有流式内容，保存它
+      if (streamingContent.value) {
+        messages.value.push({
+          role: 'assistant',
+          content: streamingContent.value + '\n\n*[响应中断]*',
+          model: streamingModel.value || model.value,
+        });
+        streamingContent.value = '';
+        streamingModel.value = '';
+      } else {
+        // 移除用户消息
+        messages.value.pop();
+      }
+    }
+  } finally {
+    loading.value = false;
+    abortController.value = null;
+  }
+}
+
 onMounted(async () => {
   checkMobile();
   if (typeof window !== 'undefined') {
@@ -290,30 +514,6 @@ watch(
   },
   { deep: true }
 );
-
-async function handleSubmit() {
-  const text = input.value.trim();
-  if (!text || !model.value || loading.value) return;
-  error.value = '';
-  input.value = '';
-  const userMsg = { role: 'user', content: text };
-  messages.value.push(userMsg);
-  loading.value = true;
-  try {
-    const nextMessages = [...messages.value];
-    const result = await sendChat(model.value, nextMessages);
-    messages.value.push({
-      role: 'assistant',
-      content: result.content,
-      model: result.model,
-    });
-  } catch (e) {
-    error.value = e.message;
-    messages.value.pop();
-  } finally {
-    loading.value = false;
-  }
-}
 </script>
 
 <style scoped>
@@ -387,36 +587,73 @@ async function handleSubmit() {
 }
 
 .conversation-item {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.conversation-item:hover {
+  background: var(--surface-hover);
+}
+
+.conversation-item--active {
+  background: var(--accent-muted);
+}
+
+.conversation-title-btn {
+  flex: 1;
+  min-width: 0;
   padding: 0.5rem 0.75rem;
   border: none;
-  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   font-size: 0.8125rem;
   text-align: left;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  transition: color 0.15s;
 }
 
-.conversation-item:hover {
-  background: var(--surface-hover);
+.conversation-item:hover .conversation-title-btn,
+.conversation-item--active .conversation-title-btn {
   color: var(--text);
 }
 
-.conversation-item--active {
-  background: var(--accent-muted);
+.conversation-item--active .conversation-title-btn {
   color: var(--accent);
+}
+
+.conversation-delete-btn {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conversation-item:hover .conversation-delete-btn {
+  opacity: 0.6;
+}
+
+.conversation-delete-btn:hover {
+  opacity: 1 !important;
 }
 
 .conversation-title {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conversation-empty {
@@ -608,33 +845,171 @@ async function handleSubmit() {
   color: var(--text-secondary);
 }
 
+/* Markdown 渲染样式 */
+.markdown-body {
+  white-space: normal;
+}
+
+.markdown-body :deep(p) {
+  margin: 0 0 1em 0;
+}
+
+.markdown-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.markdown-body :deep(pre) {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.markdown-body :deep(code) {
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Code', 'Segoe UI Mono', monospace;
+  font-size: 0.875em;
+}
+
+.markdown-body :deep(:not(pre) > code) {
+  background: var(--surface-hover);
+  padding: 0.125em 0.375em;
+  border-radius: 4px;
+  color: var(--accent);
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.markdown-body :deep(li) {
+  margin: 0.25em 0;
+}
+
+.markdown-body :deep(blockquote) {
+  border-left: 3px solid var(--accent);
+  margin: 1em 0;
+  padding-left: 1em;
+  color: var(--text-secondary);
+}
+
+.markdown-body :deep(table) {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  border: 1px solid var(--border);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.markdown-body :deep(th) {
+  background: var(--surface-hover);
+  font-weight: 600;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  margin: 1.25em 0 0.5em 0;
+  font-weight: 600;
+}
+
+.markdown-body :deep(h1) { font-size: 1.5em; }
+.markdown-body :deep(h2) { font-size: 1.25em; }
+.markdown-body :deep(h3) { font-size: 1.1em; }
+
+.markdown-body :deep(a) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.markdown-body :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.markdown-body :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5em 0;
+}
+
+/* Toast 错误提示 */
 .toast {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.75rem 1.5rem;
-  font-size: 0.875rem;
+  padding: 0.75rem 1rem;
+  margin: 0 1rem 0.5rem;
+  border-radius: var(--radius-md);
+  max-width: 45rem;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .toast--error {
   background: var(--error-bg);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.toast-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.toast-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.toast-message {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-message strong {
+  display: block;
   color: var(--error);
+  font-size: 0.875rem;
+  margin-bottom: 0.25rem;
+}
+
+.toast-message p {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  word-break: break-word;
 }
 
 .toast-close {
   background: none;
   border: none;
-  color: inherit;
+  color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 0.8125rem;
-  padding: 0.25rem 0;
+  font-size: 1.25rem;
+  padding: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
 }
 
 .toast-close:hover {
-  text-decoration: underline;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
 }
 
 .footer {
@@ -684,17 +1059,21 @@ async function handleSubmit() {
   outline: none;
 }
 
-.send-btn {
+.send-btn,
+.stop-btn {
   flex-shrink: 0;
   padding: 0.5rem 1rem;
   border-radius: var(--radius-sm);
   border: none;
-  background: var(--accent);
-  color: #fff;
   font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s;
+}
+
+.send-btn {
+  background: var(--accent);
+  color: #fff;
 }
 
 .send-btn:hover:not(:disabled) {
@@ -706,12 +1085,88 @@ async function handleSubmit() {
   cursor: not-allowed;
 }
 
+.stop-btn {
+  background: var(--error);
+  color: #fff;
+}
+
+.stop-btn:hover {
+  background: #dc2626;
+}
+
 /* 侧边栏遮罩（移动端） */
 .sidebar-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
   z-index: 8;
+}
+
+/* 删除确认模态框 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1.5rem;
+  max-width: 24rem;
+  width: 90%;
+}
+
+.modal h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.modal p {
+  margin: 0 0 1.25rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.btn-cancel,
+.btn-danger {
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  border: none;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-cancel {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.btn-cancel:hover {
+  background: var(--border);
+}
+
+.btn-danger {
+  background: var(--error);
+  color: #fff;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
 }
 
 /* ----- 响应式：移动端侧边栏抽屉 ----- */
