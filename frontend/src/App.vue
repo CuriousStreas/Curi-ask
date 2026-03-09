@@ -100,12 +100,41 @@
               <div class="block-label">{{ msg.role === 'user' ? '你' : 'AI' }}</div>
               <div class="block-body">
                 <span v-if="msg.model" class="block-model">{{ msg.model }}</span>
+                <!-- 用户消息中的图片预览 -->
+                <div v-if="msg.role === 'user' && msg.images && msg.images.length" class="block-images">
+                  <img 
+                    v-for="(img, idx) in msg.images" 
+                    :key="idx"
+                    :src="img.preview || `data:${img.mime_type};base64,${img.data}`"
+                    class="block-image block-image--user"
+                    alt="用户上传的图片"
+                  />
+                </div>
                 <div 
                   v-if="msg.role === 'assistant'"
                   class="block-text markdown-body"
                   v-html="renderMarkdown(msg.content)"
                 ></div>
                 <div v-else class="block-text">{{ msg.content }}</div>
+                <!-- AI 生成的图片 -->
+                <div v-if="msg.role === 'assistant' && msg.images && msg.images.length" class="block-images">
+                  <div v-for="(img, idx) in msg.images" :key="idx" class="generated-image-wrap">
+                    <img 
+                      :src="`data:${img.mime_type};base64,${img.data}`"
+                      class="block-image block-image--generated"
+                      alt="AI 生成的图片"
+                      @click="openImagePreview(img)"
+                    />
+                    <button 
+                      type="button" 
+                      class="download-btn"
+                      @click="downloadImage(img, `generated-${i}-${idx}`)"
+                      title="下载图片"
+                    >
+                      ⬇️
+                    </button>
+                  </div>
+                </div>
               </div>
             </article>
             <article v-if="loading" class="block block--assistant">
@@ -135,13 +164,68 @@
         <button type="button" class="toast-close" @click="error = ''">×</button>
       </div>
 
-      <div class="footer">
+      <div 
+        class="footer"
+        :class="{ 'footer--dragover': isDragOver }"
+        @dragover.prevent="handleDragOver"
+        @dragleave.prevent="handleDragLeave"
+        @drop.prevent="handleDrop"
+      >
+        <!-- 拖拽提示覆盖层 -->
+        <div v-if="isDragOver && isImageModel()" class="drop-overlay">
+          <div class="drop-hint">
+            <span class="drop-icon">📷</span>
+            <span>释放以上传图片</span>
+          </div>
+        </div>
+        
+        <!-- 图片预览区域 -->
+        <div v-if="uploadedImages.length > 0" class="uploaded-images-preview">
+          <div 
+            v-for="(img, idx) in uploadedImages" 
+            :key="idx" 
+            class="uploaded-image-item"
+          >
+            <img :src="img.preview" :alt="img.name" class="uploaded-image-thumb" />
+            <button 
+              type="button" 
+              class="remove-image-btn"
+              @click="removeUploadedImage(idx)"
+              title="移除图片"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+        
         <form class="input-wrap" @submit.prevent="handleSubmit">
+          <!-- 图片上传按钮（仅图片模型显示） -->
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept="image/*"
+            multiple
+            class="hidden-file-input"
+            @change="handleImageUpload"
+          />
+          <button
+            v-if="isImageModel()"
+            type="button"
+            class="upload-btn"
+            @click="triggerFileInput"
+            :disabled="loading"
+            title="上传图片"
+          >
+            🖼️
+          </button>
+          
           <textarea
+            ref="textareaRef"
             class="input"
             v-model="input"
             @keydown.enter.exact.prevent="handleSubmit"
-            placeholder="输入问题，Enter 发送"
+            @paste="handlePaste"
+            :placeholder="isImageModel() ? '描述你想生成的图片，支持拖入或粘贴图片...' : '输入问题，Enter 发送'"
             :disabled="loading"
             rows="1"
             aria-label="输入消息"
@@ -198,6 +282,20 @@ import hljs from 'highlight.js';
 const THEME_KEY = 'curi-ask-theme';
 const CONVERSATIONS_KEY = 'curi-ask-conversations';
 const API_BASE = '';
+
+// 图片生成模型列表（支持图片输入的模型）
+const IMAGE_MODELS = [
+  // Nano Banana 系列 (后端实际模型名)
+  'gemini-3.1-flash-image-preview:image',  // Nano Banana Flash
+  'gemini-3-pro-image-preview:image',       // Nano Banana Pro (Image)
+  'gemini-3-pro-image-preview',             // Nano Banana Pro
+  // Gemini 原生多模态模型
+  'gemini-2.5-flash-preview-04-17',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+];
 
 // 配置 marked
 marked.setOptions({
@@ -257,7 +355,156 @@ const deleteConfirmId = ref(null);
 // 流式输出相关
 const streamingContent = ref('');
 const streamingModel = ref('');
+const streamingImages = ref([]);  // 流式图片
 const abortController = ref(null);
+
+// 图片上传相关
+const uploadedImages = ref([]);  // 用户上传的图片
+const fileInputRef = ref(null);  // 文件输入框引用
+const textareaRef = ref(null);   // 文本框引用
+const isDragOver = ref(false);   // 是否正在拖拽
+
+// 判断当前模型是否为图片生成模型
+function isImageModel() {
+  return IMAGE_MODELS.includes(model.value);
+}
+
+// 处理图片上传
+function handleImageUpload(event) {
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
+  
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) {
+      error.value = '请选择图片文件';
+      continue;
+    }
+    
+    if (file.size > 10 * 1024 * 1024) {  // 10MB 限制
+      error.value = '图片大小不能超过 10MB';
+      continue;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target.result.split(',')[1];  // 去掉 data:image/xxx;base64, 前缀
+      uploadedImages.value.push({
+        name: file.name,
+        mime_type: file.type,
+        data: base64,
+        preview: e.target.result  // 完整的 data URL 用于预览
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+  
+  // 重置 input 以允许重复选择同一文件
+  if (fileInputRef.value) {
+    fileInputRef.value.value = '';
+  }
+}
+
+// 移除上传的图片
+function removeUploadedImage(index) {
+  uploadedImages.value.splice(index, 1);
+}
+
+// 触发文件选择
+function triggerFileInput() {
+  if (fileInputRef.value) {
+    fileInputRef.value.click();
+  }
+}
+
+// 通用的图片文件处理函数
+function processImageFile(file) {
+  if (!file.type.startsWith('image/')) {
+    error.value = '请选择图片文件';
+    return;
+  }
+  
+  if (file.size > 10 * 1024 * 1024) {  // 10MB 限制
+    error.value = '图片大小不能超过 10MB';
+    return;
+  }
+  
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const base64 = e.target.result.split(',')[1];
+    uploadedImages.value.push({
+      name: file.name || 'pasted-image',
+      mime_type: file.type,
+      data: base64,
+      preview: e.target.result
+    });
+  };
+  reader.readAsDataURL(file);
+}
+
+// 处理拖拽进入
+function handleDragOver(event) {
+  if (!isImageModel()) return;
+  
+  // 检查是否包含文件
+  if (event.dataTransfer && event.dataTransfer.types.includes('Files')) {
+    isDragOver.value = true;
+  }
+}
+
+// 处理拖拽离开
+function handleDragLeave(event) {
+  // 防止子元素触发 dragleave
+  const rect = event.currentTarget.getBoundingClientRect();
+  const x = event.clientX;
+  const y = event.clientY;
+  
+  if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+    isDragOver.value = false;
+  }
+}
+
+// 处理拖拽释放
+function handleDrop(event) {
+  isDragOver.value = false;
+  
+  if (!isImageModel()) {
+    error.value = '当前模型不支持图片输入，请切换到图片模型';
+    return;
+  }
+  
+  const files = event.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+  
+  for (const file of files) {
+    processImageFile(file);
+  }
+}
+
+// 处理粘贴事件
+function handlePaste(event) {
+  if (!isImageModel()) return;
+  
+  const items = event.clipboardData?.items;
+  if (!items) return;
+  
+  let hasImage = false;
+  
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      hasImage = true;
+      const file = item.getAsFile();
+      if (file) {
+        processImageFile(file);
+      }
+    }
+  }
+  
+  // 如果粘贴了图片，阻止默认的文本粘贴行为（对于纯图片粘贴）
+  // 但如果同时有文本，允许文本粘贴
+  if (hasImage && !event.clipboardData.getData('text')) {
+    event.preventDefault();
+  }
+}
 
 const isMobile = ref(false);
 function checkMobile() {
@@ -372,22 +619,73 @@ function stopStream() {
   loading.value = false;
 }
 
+// 下载图片
+function downloadImage(img, filename) {
+  const link = document.createElement('a');
+  link.href = `data:${img.mime_type};base64,${img.data}`;
+  link.download = `${filename}.${img.mime_type.split('/')[1] || 'png'}`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+// 打开图片预览（简单实现：新标签页）
+function openImagePreview(img) {
+  const dataUrl = `data:${img.mime_type};base64,${img.data}`;
+  window.open(dataUrl, '_blank');
+}
+
 async function handleSubmit() {
   const text = input.value.trim();
   if (!text || !model.value || loading.value) return;
   error.value = '';
   input.value = '';
-  const userMsg = { role: 'user', content: text };
+  
+  // 收集上传的图片
+  const imagesToSend = uploadedImages.value.length > 0 
+    ? uploadedImages.value.map(img => ({
+        mime_type: img.mime_type,
+        data: img.data
+      }))
+    : null;
+  
+  // 用户消息（包含图片预览）
+  const userMsg = { 
+    role: 'user', 
+    content: text,
+    images: uploadedImages.value.length > 0 
+      ? uploadedImages.value.map(img => ({
+          mime_type: img.mime_type,
+          data: img.data,
+          preview: img.preview
+        }))
+      : undefined
+  };
   messages.value.push(userMsg);
+  
+  // 清空已上传图片
+  uploadedImages.value = [];
+  
   loading.value = true;
   streamingContent.value = '';
   streamingModel.value = '';
+  streamingImages.value = [];
   
   // 创建 AbortController 用于停止流
   abortController.value = new AbortController();
   
   try {
-    const nextMessages = [...messages.value];
+    // 构建请求消息（不包含 preview 字段，只发送 API 需要的数据）
+    const nextMessages = messages.value.map(msg => {
+      const m = { role: msg.role, content: msg.content };
+      if (msg.images && msg.images.length > 0) {
+        m.images = msg.images.map(img => ({
+          mime_type: img.mime_type,
+          data: img.data
+        }));
+      }
+      return m;
+    });
     
     // 使用流式接口
     const res = await fetch(`${API_BASE}/api/chat/stream`, {
@@ -433,15 +731,28 @@ async function handleSubmit() {
               streamingModel.value = data.model;
             }
             
+            // 处理图片数据
+            if (data.image) {
+              streamingImages.value.push(data.image);
+            }
+            
             if (data.done) {
               // 流结束，保存消息
-              messages.value.push({
+              const assistantMsg = {
                 role: 'assistant',
                 content: streamingContent.value,
                 model: streamingModel.value || model.value,
-              });
+              };
+              
+              // 添加生成的图片
+              if (streamingImages.value.length > 0) {
+                assistantMsg.images = [...streamingImages.value];
+              }
+              
+              messages.value.push(assistantMsg);
               streamingContent.value = '';
               streamingModel.value = '';
+              streamingImages.value = [];
             }
             
             // 滚动到底部
@@ -464,14 +775,19 @@ async function handleSubmit() {
     } else {
       error.value = e.message;
       // 如果已有流式内容，保存它
-      if (streamingContent.value) {
-        messages.value.push({
+      if (streamingContent.value || streamingImages.value.length > 0) {
+        const assistantMsg = {
           role: 'assistant',
           content: streamingContent.value + '\n\n*[响应中断]*',
           model: streamingModel.value || model.value,
-        });
+        };
+        if (streamingImages.value.length > 0) {
+          assistantMsg.images = [...streamingImages.value];
+        }
+        messages.value.push(assistantMsg);
         streamingContent.value = '';
         streamingModel.value = '';
+        streamingImages.value = [];
       } else {
         // 移除用户消息
         messages.value.pop();
@@ -1016,8 +1332,56 @@ watch(
   flex-shrink: 0;
   padding: 1.25rem 1.5rem 2rem;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
   border-top: 1px solid var(--border-subtle);
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.footer--dragover {
+  background: var(--accent-muted);
+  border-top-color: var(--accent);
+}
+
+/* ----- 拖拽覆盖层 ----- */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+  animation: dropPulse 1s ease-in-out infinite;
+}
+
+@keyframes dropPulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+.drop-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--accent);
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+.drop-icon {
+  font-size: 2rem;
+  animation: dropBounce 0.6s ease-in-out infinite;
+}
+
+@keyframes dropBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
 }
 
 .input-wrap {
@@ -1092,6 +1456,149 @@ watch(
 
 .stop-btn:hover {
   background: #dc2626;
+}
+
+/* ----- 图片上传与预览 ----- */
+.hidden-file-input {
+  display: none;
+}
+
+.upload-btn {
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-btn:hover:not(:disabled) {
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.upload-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.uploaded-images-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  max-width: 45rem;
+  width: 100%;
+  margin-bottom: 0.75rem;
+}
+
+.uploaded-image-item {
+  position: relative;
+  width: 4rem;
+  height: 4rem;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.uploaded-image-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.remove-image-btn {
+  position: absolute;
+  top: 0.125rem;
+  right: 0.125rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 0.875rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.remove-image-btn:hover {
+  background: var(--error);
+}
+
+/* ----- 消息中的图片 ----- */
+.block-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.block-image {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.block-image--user {
+  max-height: 8rem;
+  object-fit: contain;
+}
+
+.block-image--generated {
+  max-height: 24rem;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.block-image--generated:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.generated-image-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.download-btn {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.generated-image-wrap:hover .download-btn {
+  opacity: 1;
+}
+
+.download-btn:hover {
+  background: var(--accent);
 }
 
 /* 侧边栏遮罩（移动端） */

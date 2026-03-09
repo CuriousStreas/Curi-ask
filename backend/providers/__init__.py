@@ -15,15 +15,23 @@
 from .base import BaseProvider
 from .openai_compatible import OpenAICompatibleProvider
 from .gemini import GeminiProvider, GEMINI_MODELS
-from .registry import ProviderRegistry, init_registry, get_registry, get_provider
+from .nano_banana import NanoBananaProvider, NANO_BANANA_MODELS
+from .registry import (
+    ProviderRegistry,
+    init_registry,
+    get_registry,
+    get_provider,
+)
 
 __all__ = [
-    'BaseProvider',
-    'OpenAICompatibleProvider',
-    'GeminiProvider',
-    'GEMINI_MODELS',
-    'ProviderRegistry',
-    'init_registry',
-    'get_registry',
-    'get_provider',
+    "BaseProvider",
+    "OpenAICompatibleProvider",
+    "GeminiProvider",
+    "GEMINI_MODELS",
+    "NanoBananaProvider",
+    "NANO_BANANA_MODELS",
+    "ProviderRegistry",
+    "init_registry",
+    "get_registry",
+    "get_provider",
 ]

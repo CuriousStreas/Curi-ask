@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Type
 from .base import BaseProvider
 from .openai_compatible import OpenAICompatibleProvider
 from .gemini import GeminiProvider
+from .nano_banana import NanoBananaProvider
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +32,9 @@ class ProviderRegistry:
             set_as_default: 是否设为默认提供商
         """
         self._providers[provider.name] = provider
-        logger.info(f"注册提供商: {provider.name}")
         
         if set_as_default or self._default_provider is None:
             self._default_provider = provider
-            logger.info(f"设置默认提供商: {provider.name}")
     
     def get_provider(self, model: str) -> BaseProvider:
         """
@@ -76,6 +75,25 @@ class ProviderRegistry:
 _registry: Optional[ProviderRegistry] = None
 
 
+def _mask_api_key(api_key: str, show_chars: int = 8) -> str:
+    """
+    对 API key 进行脱敏处理，显示前 N 位。
+    
+    Args:
+        api_key: API 密钥
+        show_chars: 显示的字符数
+        
+    Returns:
+        脱敏后的字符串
+    """
+    if not api_key:
+        return "(未设置)"
+    key_len = len(api_key)
+    if key_len <= show_chars:
+        return api_key[:2] + "***"
+    return f"{api_key[:show_chars]}***({key_len}位)"
+
+
 def init_registry(base_url: str, api_key: str, chat_path: str = "/v1/chat/completions") -> ProviderRegistry:
     """
     初始化全局提供商注册表。
@@ -91,10 +109,13 @@ def init_registry(base_url: str, api_key: str, chat_path: str = "/v1/chat/comple
     global _registry
     _registry = ProviderRegistry()
     
-    # 调试：打印配置（脱敏）
-    key_len = len(api_key) if api_key else 0
-    key_preview = f"长度={key_len}, 前缀={api_key[:3] if key_len >= 3 else 'N/A'}"
-    logger.info(f"初始化注册表 - base_url: {base_url}, api_key: [{key_preview}], chat_path: {chat_path}")
+    # 注册 Nano Banana 提供商（图片生成）
+    # 注意：必须先于 Gemini 注册，因为 Nano Banana 使用精确匹配，而 Gemini 使用前缀匹配
+    nano_banana_provider = NanoBananaProvider(
+        base_url=base_url,
+        api_key=api_key,
+    )
+    _registry.register(nano_banana_provider)
     
     # 注册 Gemini 提供商（专门处理 gemini-* 模型）
     gemini_provider = GeminiProvider(
@@ -111,7 +132,8 @@ def init_registry(base_url: str, api_key: str, chat_path: str = "/v1/chat/comple
     )
     _registry.register(openai_provider, set_as_default=True)
     
-    logger.info(f"提供商注册表初始化完成，已注册: {_registry.list_providers()}")
+    # 简洁的初始化日志
+    logger.info(f"API: {base_url} | Key: {_mask_api_key(api_key)} | Providers: {', '.join(_registry.list_providers())}")
     return _registry
 
 

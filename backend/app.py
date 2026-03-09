@@ -4,7 +4,7 @@ from flask_cors import CORS
 
 from config import PORT, MODELS, AI_API_BASE_URL, AI_API_KEY, AI_CHAT_PATH
 from chat_service import chat_completion, chat_completion_stream
-from providers import init_registry, GEMINI_MODELS
+from providers import init_registry, GEMINI_MODELS, NANO_BANANA_MODELS
 
 # 配置日志
 logging.basicConfig(
@@ -39,13 +39,18 @@ def get_all_models():
         if gm['id'] not in existing_ids:
             models.append(gm)
     
+    # 添加 Nano Banana 图片生成模型
+    existing_ids = {m['id'] for m in models}
+    for nb in NANO_BANANA_MODELS:
+        if nb['id'] not in existing_ids:
+            models.append(nb)
+    
     return models
 
 
 @app.route("/api/models", methods=["GET"])
 def api_models():
     models = get_all_models()
-    logger.info(f"获取模型列表，共 {len(models)} 个模型")
     return jsonify(models=models)
 
 
@@ -56,12 +61,15 @@ def api_chat():
         body = request.get_json(silent=True) or {}
         model = body.get("model")
         messages = body.get("messages")
+        images = body.get("images")  # 可选的图片列表
+        
         if not model or not isinstance(messages, list) or len(messages) == 0:
             logger.warning(f"无效请求参数: model={model}, messages_len={len(messages) if isinstance(messages, list) else 'invalid'}")
             return jsonify(error="请提供 model 和 messages"), 400
         
-        logger.info(f"[非流式] 收到请求: model={model}, messages_count={len(messages)}")
-        result = chat_completion(model, messages)
+        img_info = f"+{len(images)}图" if images else ""
+        logger.info(f"[Chat] {model} | {len(messages)}条消息{img_info}")
+        result = chat_completion(model, messages, images=images)
         return jsonify(result)
     except RuntimeError as e:
         logger.error(f"[非流式] RuntimeError: {str(e)}")
@@ -78,15 +86,18 @@ def api_chat_stream():
         body = request.get_json(silent=True) or {}
         model = body.get("model")
         messages = body.get("messages")
+        images = body.get("images")  # 可选的图片列表
+        
         if not model or not isinstance(messages, list) or len(messages) == 0:
             logger.warning(f"[流式] 无效请求参数: model={model}")
             return jsonify(error="请提供 model 和 messages"), 400
         
-        logger.info(f"[流式] 收到请求: model={model}, messages_count={len(messages)}")
+        img_info = f"+{len(images)}图" if images else ""
+        logger.info(f"[Stream] {model} | {len(messages)}条消息{img_info}")
         
         def generate():
             try:
-                for chunk in chat_completion_stream(model, messages):
+                for chunk in chat_completion_stream(model, messages, images=images):
                     yield chunk
             except Exception as e:
                 logger.exception(f"[流式] 生成异常: {str(e)}")
@@ -124,6 +135,7 @@ def health_check():
 
 if __name__ == "__main__":
     models = get_all_models()
-    logger.info(f"启动服务器，端口: {PORT}，模型数量: {len(models)}")
-    logger.info(f"已加载模型: {[m['id'] for m in models]}")
-    app.run(host="0.0.0.0", port=PORT, debug=True, threaded=True)
+    model_ids = [m['id'] for m in models]
+    logger.info(f"🚀 Curi Ask 启动 | Port: {PORT} | Models: {len(models)}个")
+    logger.info(f"📋 {', '.join(model_ids)}")
+    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
