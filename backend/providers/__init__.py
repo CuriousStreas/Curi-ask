@@ -16,6 +16,7 @@ from .base import BaseProvider
 from .openai_compatible import OpenAICompatibleProvider
 from .gemini import GeminiProvider, GEMINI_MODELS
 from .nano_banana import NanoBananaProvider, NANO_BANANA_MODELS
+from .taffy import TaffyProvider, TAFFY_MODELS
 from .registry import (
     ProviderRegistry,
     init_registry,
@@ -30,6 +31,8 @@ __all__ = [
     "GEMINI_MODELS",
     "NanoBananaProvider",
     "NANO_BANANA_MODELS",
+    "TaffyProvider",
+    "TAFFY_MODELS",
     "ProviderRegistry",
     "init_registry",
     "get_registry",

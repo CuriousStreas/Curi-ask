@@ -4,7 +4,7 @@ from flask_cors import CORS
 
 from config import PORT, MODELS, AI_API_BASE_URL, AI_API_KEY, AI_CHAT_PATH
 from chat_service import chat_completion, chat_completion_stream
-from providers import init_registry, GEMINI_MODELS, NANO_BANANA_MODELS
+from providers import init_registry, GEMINI_MODELS, NANO_BANANA_MODELS, TAFFY_MODELS
 
 # 配置日志
 logging.basicConfig(
@@ -44,6 +44,12 @@ def get_all_models():
     for nb in NANO_BANANA_MODELS:
         if nb['id'] not in existing_ids:
             models.append(nb)
+    
+    # 添加塔菲酱模型（内网限定）
+    existing_ids = {m['id'] for m in models}
+    for tf in TAFFY_MODELS:
+        if tf['id'] not in existing_ids:
+            models.append(tf)
     
     return models
 

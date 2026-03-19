@@ -87,71 +87,223 @@
         <div class="content">
           <template v-if="messages.length === 0">
             <div class="empty">
+              <div class="empty-icon">💬</div>
               <p class="empty-title">开始对话</p>
               <p class="empty-desc">选择模型后，在下方输入问题。对话会保存在左侧列表中。</p>
             </div>
           </template>
           <template v-else>
+            <!-- 用户消息 -->
             <article
               v-for="(msg, i) in messages"
               :key="i"
-              :class="['block', `block--${msg.role}`]"
+              :class="['message-card', `message-card--${msg.role}`]"
             >
-              <div class="block-label">{{ msg.role === 'user' ? '你' : 'AI' }}</div>
-              <div class="block-body">
-                <span v-if="msg.model" class="block-model">{{ msg.model }}</span>
-                <!-- 用户消息中的图片预览 -->
-                <div v-if="msg.role === 'user' && msg.images && msg.images.length" class="block-images">
-                  <img 
-                    v-for="(img, idx) in msg.images" 
-                    :key="idx"
-                    :src="img.preview || `data:${img.mime_type};base64,${img.data}`"
-                    class="block-image block-image--user"
-                    alt="用户上传的图片"
-                  />
+              <!-- 用户消息 -->
+              <template v-if="msg.role === 'user'">
+                <div class="message-avatar message-avatar--user">
+                  <span class="avatar-icon">👤</span>
                 </div>
-                <div 
-                  v-if="msg.role === 'assistant'"
-                  class="block-text markdown-body"
-                  v-html="renderMarkdown(msg.content)"
-                ></div>
-                <div v-else class="block-text">{{ msg.content }}</div>
-                <!-- AI 生成的图片 -->
-                <div v-if="msg.role === 'assistant' && msg.images && msg.images.length" class="block-images">
-                  <div v-for="(img, idx) in msg.images" :key="idx" class="generated-image-wrap">
+                <div class="message-content">
+                  <div class="message-header">
+                    <span class="message-role">你</span>
+                  </div>
+                  <!-- 用户上传的图片 -->
+                  <div v-if="msg.images && msg.images.length" class="message-images">
                     <img 
-                      :src="`data:${img.mime_type};base64,${img.data}`"
-                      class="block-image block-image--generated"
-                      alt="AI 生成的图片"
-                      @click="openImagePreview(img)"
+                      v-for="(img, idx) in msg.images" 
+                      :key="idx"
+                      :src="img.preview || `data:${img.mime_type};base64,${img.data}`"
+                      class="message-image message-image--user"
+                      alt="用户上传的图片"
                     />
-                    <button 
-                      type="button" 
-                      class="download-btn"
-                      @click="downloadImage(img, `generated-${i}-${idx}`)"
-                      title="下载图片"
-                    >
-                      ⬇️
-                    </button>
+                  </div>
+                  <div class="message-body message-body--user">
+                    <div class="message-text">{{ msg.content }}</div>
                   </div>
                 </div>
-              </div>
+              </template>
+              
+              <!-- AI 消息 -->
+              <template v-else>
+                <div class="message-avatar message-avatar--assistant">
+                  <svg class="avatar-cat" viewBox="0 0 32 32" fill="none">
+                    <!-- 猫耳朵 -->
+                    <path d="M6 13L3 3L11 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M26 13L29 3L21 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <!-- 猫脸轮廓 -->
+                    <ellipse cx="16" cy="18" rx="11" ry="10" stroke="currentColor" stroke-width="1.5"/>
+                    <!-- 眼睛 -->
+                    <circle cx="11" cy="16" r="1.5" fill="currentColor"/>
+                    <circle cx="21" cy="16" r="1.5" fill="currentColor"/>
+                    <!-- 鼻子 -->
+                    <path d="M16 19L14.5 21H17.5L16 19Z" fill="currentColor"/>
+                    <!-- 嘴 -->
+                    <path d="M13 23C14.5 24.5 17.5 24.5 19 23" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                    <!-- 胡须 -->
+                    <path d="M4 17H9" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+                    <path d="M4 20H8" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+                    <path d="M28 17H23" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+                    <path d="M28 20H24" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+                  </svg>
+                </div>
+                <div class="message-content">
+                  <div class="message-header">
+                    <span class="message-role">AI</span>
+                    <span v-if="msg.model" class="message-model">{{ formatModelName(msg.model) }}</span>
+                  </div>
+                  
+                  <!-- 思考过程（可折叠） -->
+                  <div 
+                    v-if="hasThinkingContent(msg.content)" 
+                    class="thinking-block"
+                    :class="{ 'thinking-block--expanded': expandedThinking[i] }"
+                  >
+                    <button 
+                      type="button" 
+                      class="thinking-toggle"
+                      @click="toggleThinking(i)"
+                    >
+                      <span class="thinking-icon">💭</span>
+                      <span class="thinking-label">思考过程</span>
+                      <span class="thinking-arrow">{{ expandedThinking[i] ? '▼' : '▶' }}</span>
+                    </button>
+                    <div v-show="expandedThinking[i]" class="thinking-content">
+                      <div v-html="renderThinkingContent(msg.content)"></div>
+                    </div>
+                  </div>
+                  
+                  <!-- 正文内容 -->
+                  <div class="message-body">
+                    <div 
+                      class="message-text markdown-body"
+                      v-html="renderMainContent(msg.content)"
+                    ></div>
+                  </div>
+                  
+                  <!-- AI 生成的图片 -->
+                  <div v-if="msg.images && msg.images.length" class="message-images message-images--generated">
+                    <div v-for="(img, idx) in msg.images" :key="idx" class="generated-image-wrap">
+                      <img 
+                        :src="`data:${img.mime_type};base64,${img.data}`"
+                        class="message-image message-image--generated"
+                        alt="AI 生成的图片"
+                        @click="openImagePreview(img)"
+                      />
+                      <div class="image-actions">
+                        <button 
+                          type="button" 
+                          class="image-action-btn"
+                          @click="openImagePreview(img)"
+                          title="预览"
+                        >
+                          🔍
+                        </button>
+                        <button 
+                          type="button" 
+                          class="image-action-btn"
+                          @click="downloadImage(img, `generated-${i}-${idx}`)"
+                          title="下载"
+                        >
+                          ⬇️
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
             </article>
-            <article v-if="loading" class="block block--assistant">
-              <div class="block-label">AI</div>
-              <div class="block-body">
-                <span v-if="streamingModel" class="block-model">{{ streamingModel }}</span>
+            
+            <!-- 流式输出中 -->
+            <article v-if="loading" class="message-card message-card--assistant message-card--streaming">
+              <div class="message-avatar message-avatar--assistant">
+                <svg class="avatar-cat avatar-cat--typing" viewBox="0 0 32 32" fill="none">
+                  <path d="M6 13L3 3L11 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M26 13L29 3L21 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <ellipse cx="16" cy="18" rx="11" ry="10" stroke="currentColor" stroke-width="1.5"/>
+                  <circle cx="11" cy="16" r="1.5" fill="currentColor"/>
+                  <circle cx="21" cy="16" r="1.5" fill="currentColor"/>
+                  <path d="M16 19L14.5 21H17.5L16 19Z" fill="currentColor"/>
+                  <path d="M13 23C14.5 24.5 17.5 24.5 19 23" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                  <path d="M4 17H9" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+                  <path d="M4 20H8" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+                  <path d="M28 17H23" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+                  <path d="M28 20H24" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div class="message-content">
+                <div class="message-header">
+                  <span class="message-role">AI</span>
+                  <span v-if="streamingModel" class="message-model">{{ formatModelName(streamingModel) }}</span>
+                  <span class="typing-indicator">
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                  </span>
+                </div>
+                
+                <!-- 流式思考过程（使用纯文本渲染） -->
                 <div 
-                  v-if="streamingContent"
-                  class="block-text markdown-body"
-                  v-html="renderMarkdown(streamingContent)"
-                ></div>
-                <div v-else class="block-text block-text--muted">正在回复…</div>
+                  v-if="hasThinkingContent(streamingContent)" 
+                  class="thinking-block"
+                  :class="{ 'thinking-block--expanded': isStreamingThinking }"
+                >
+                  <button 
+                    type="button" 
+                    class="thinking-toggle"
+                    @click="isStreamingThinking = !isStreamingThinking"
+                  >
+                    <span class="thinking-icon">💭</span>
+                    <span class="thinking-label">思考中...</span>
+                    <span class="thinking-arrow">{{ isStreamingThinking ? '▼' : '▶' }}</span>
+                  </button>
+                  <div v-show="isStreamingThinking" class="thinking-content">
+                    <div v-html="renderPlainText(getThinkingContent(streamingContent))"></div>
+                  </div>
+                </div>
+                
+                <!-- 流式正文（使用纯文本渲染，提高性能） -->
+                <div class="message-body">
+                  <div 
+                    v-if="getMainContent(streamingContent)"
+                    class="message-text streaming-text"
+                    v-html="renderPlainText(getMainContent(streamingContent))"
+                  ></div>
+                  <div v-else-if="!hasThinkingContent(streamingContent)" class="message-text message-text--placeholder">
+                    正在思考...
+                  </div>
+                </div>
+                
+                <!-- 流式图片 -->
+                <div v-if="streamingImages.length" class="message-images message-images--generated">
+                  <div v-for="(img, idx) in streamingImages" :key="idx" class="generated-image-wrap">
+                    <img 
+                      :src="`data:${img.mime_type};base64,${img.data}`"
+                      class="message-image message-image--generated"
+                      alt="生成中的图片"
+                    />
+                  </div>
+                </div>
               </div>
             </article>
           </template>
         </div>
       </main>
+
+      <!-- 滚动到底部按钮 -->
+      <Transition name="fade">
+        <button 
+          v-show="showScrollBtn"
+          type="button" 
+          class="scroll-bottom-btn"
+          @click="scrollToBottom(true)"
+          title="滚动到底部"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12l7 7 7-7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </Transition>
 
       <div v-if="error" class="toast toast--error">
         <div class="toast-content">
@@ -237,7 +389,10 @@
             @click="stopStream"
             aria-label="停止生成"
           >
-            ⏹️ 停止
+            <svg class="stop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>
+            </svg>
+            <span>停止</span>
           </button>
           <button
             v-else
@@ -275,11 +430,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 
 const THEME_KEY = 'curi-ask-theme';
+const MODEL_KEY = 'curi-ask-model';
 const CONVERSATIONS_KEY = 'curi-ask-conversations';
 const API_BASE = '';
 
@@ -322,14 +478,44 @@ function getConversationTitle(messages) {
   return t.length > 24 ? t.slice(0, 24) + '…' : t;
 }
 
+// Markdown 渲染缓存
+const markdownCache = new Map();
+const MAX_CACHE_SIZE = 100;
+
 function renderMarkdown(content) {
   if (!content) return '';
+  
+  // 检查缓存
+  const cacheKey = content.length > 100 ? content.slice(0, 100) + content.length : content;
+  if (markdownCache.has(cacheKey)) {
+    return markdownCache.get(cacheKey);
+  }
+  
   try {
-    return marked.parse(content);
+    const result = marked.parse(content);
+    
+    // 缓存结果（限制缓存大小）
+    if (markdownCache.size >= MAX_CACHE_SIZE) {
+      const firstKey = markdownCache.keys().next().value;
+      markdownCache.delete(firstKey);
+    }
+    markdownCache.set(cacheKey, result);
+    
+    return result;
   } catch (e) {
     console.error('Markdown 渲染失败:', e);
     return content;
   }
+}
+
+// 简单文本渲染（流式时使用，不解析 Markdown）
+function renderPlainText(content) {
+  if (!content) return '';
+  return content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
 }
 
 async function getModels() {
@@ -364,9 +550,127 @@ const fileInputRef = ref(null);  // 文件输入框引用
 const textareaRef = ref(null);   // 文本框引用
 const isDragOver = ref(false);   // 是否正在拖拽
 
+// 思考过程折叠状态
+const expandedThinking = ref({});
+
+// 显示滚动到底部按钮
+const showScrollBtn = ref(false);
+
+// 流式更新节流
+let lastScrollTime = 0;
+const SCROLL_THROTTLE = 100; // 100ms 节流
+
+// 流式思考状态
+const isStreamingThinking = ref(true); // 流式时思考默认展开
+
 // 判断当前模型是否为图片生成模型
 function isImageModel() {
   return IMAGE_MODELS.includes(model.value);
+}
+
+// 格式化模型名称（更友好的显示）
+function formatModelName(modelId) {
+  if (!modelId) return '';
+  // 模型名称映射
+  const nameMap = {
+    'taffy': '� 塔菲酱',
+    'taffy-think': '� 塔菲酱(思考)',
+    'gemini-3.1-flash-image-preview:image': 'Nano Flash',
+    'gemini-3-pro-image-preview:image': 'Nano Pro',
+    'gemini-3-pro-image-preview': 'Nano Pro',
+  };
+  return nameMap[modelId] || modelId;
+}
+
+// 检测内容中是否包含思考过程
+function hasThinkingContent(content) {
+  if (!content) return false;
+  return content.includes('💭');
+}
+
+// 提取思考过程内容（支持流式）
+function getThinkingContent(content) {
+  if (!content) return '';
+  // 按 💭 分割，提取所有思考内容
+  const parts = content.split(/(?=💭)/);
+  const thinkingParts = [];
+  
+  for (const part of parts) {
+    if (part.startsWith('💭')) {
+      // 找到这个思考块的结束位置（下一个非💭开头的内容或换行后的非💭内容）
+      const lines = part.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.startsWith('💭') || (i === 0 && line.includes('💭'))) {
+          thinkingParts.push(line.replace(/💭\s*/g, ''));
+        }
+      }
+    }
+  }
+  
+  return thinkingParts.join('\n');
+}
+
+// 提取正文内容（排除思考过程，支持流式）
+function getMainContent(content) {
+  if (!content) return '';
+  const lines = content.split('\n');
+  const mainLines = lines.filter(line => !line.includes('💭'));
+  return mainLines.join('\n').trim();
+}
+
+// 渲染思考过程
+function renderThinkingContent(content) {
+  const thinking = getThinkingContent(content);
+  if (!thinking) return '';
+  // 保留换行，转换为 HTML
+  return thinking
+    .split('\n')
+    .filter(line => line.trim())
+    .map(line => `<p>${escapeHtml(line)}</p>`)
+    .join('');
+}
+
+// 渲染正文内容
+function renderMainContent(content) {
+  const main = getMainContent(content);
+  if (!main) return '';
+  return renderMarkdown(main);
+}
+
+// HTML 转义
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// 切换思考过程的展开/折叠
+function toggleThinking(index) {
+  expandedThinking.value[index] = !expandedThinking.value[index];
+}
+
+// 滚动到底部
+function scrollToBottom(smooth = false) {
+  if (listRef.value) {
+    if (smooth) {
+      listRef.value.scrollTo({ 
+        top: listRef.value.scrollHeight, 
+        behavior: 'smooth' 
+      });
+    } else {
+      listRef.value.scrollTop = listRef.value.scrollHeight;
+    }
+  }
+}
+
+// 检测是否需要显示滚动按钮
+function checkScrollPosition() {
+  if (!listRef.value) return;
+  const { scrollTop, scrollHeight, clientHeight } = listRef.value;
+  // 距离底部超过 200px 时显示按钮
+  showScrollBtn.value = scrollHeight - scrollTop - clientHeight > 200;
 }
 
 // 处理图片上传
@@ -667,9 +971,18 @@ async function handleSubmit() {
   uploadedImages.value = [];
   
   loading.value = true;
+  
+  // 发送后立即滚动到底部
+  await nextTick();
+  scrollToBottom(true);
+  
+  // 延迟再滚动一次确保到底部
+  setTimeout(() => scrollToBottom(true), 50);
+  
   streamingContent.value = '';
   streamingModel.value = '';
   streamingImages.value = [];
+  isStreamingThinking.value = true; // 新请求时思考默认展开
   
   // 创建 AbortController 用于停止流
   abortController.value = new AbortController();
@@ -737,7 +1050,10 @@ async function handleSubmit() {
             }
             
             if (data.done) {
-              // 流结束，保存消息
+              // 流结束，折叠思考过程
+              isStreamingThinking.value = false;
+              
+              // 保存消息
               const assistantMsg = {
                 role: 'assistant',
                 content: streamingContent.value,
@@ -753,12 +1069,17 @@ async function handleSubmit() {
               streamingContent.value = '';
               streamingModel.value = '';
               streamingImages.value = [];
-            }
-            
-            // 滚动到底部
-            await nextTick();
-            if (listRef.value) {
-              listRef.value.scrollTop = listRef.value.scrollHeight;
+              
+              // 完成时滚动到底部
+              await nextTick();
+              scrollToBottom();
+            } else {
+              // 节流滚动，避免频繁更新
+              const now = Date.now();
+              if (now - lastScrollTime > SCROLL_THROTTLE) {
+                lastScrollTime = now;
+                scrollToBottom();
+              }
             }
           } catch (e) {
             if (e.name !== 'SyntaxError') {
@@ -813,14 +1134,42 @@ onMounted(async () => {
   try {
     const list = await getModels();
     models.value = list;
-    if (list.length && !model.value) model.value = list[0].id;
+    
+    // 恢复上次选择的模型
+    const savedModel = localStorage.getItem(MODEL_KEY);
+    if (savedModel && list.some(m => m.id === savedModel)) {
+      model.value = savedModel;
+    } else if (list.length && !model.value) {
+      model.value = list[0].id;
+    }
   } catch (e) {
     error.value = e.message;
+  }
+  
+  // 添加滚动监听
+  if (listRef.value) {
+    listRef.value.addEventListener('scroll', checkScrollPosition);
+  }
+});
+
+onUnmounted(() => {
+  // 移除滚动监听
+  if (listRef.value) {
+    listRef.value.removeEventListener('scroll', checkScrollPosition);
+  }
+});
+
+// 保存模型选择
+watch(model, (val) => {
+  if (val) {
+    try {
+      localStorage.setItem(MODEL_KEY, val);
+    } catch (_) {}
   }
 });
 
 watch(messages, () => {
-  if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight;
+  scrollToBottom();
 }, { deep: true });
 
 watch(
@@ -834,9 +1183,10 @@ watch(
 
 <style scoped>
 .app {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   position: relative;
+  overflow: hidden;
 }
 
 /* ----- 侧边栏（Gemini 风格）----- */
@@ -847,7 +1197,9 @@ watch(
   flex-direction: column;
   background: var(--surface);
   border-right: 1px solid var(--border-subtle);
-  min-height: 100vh;
+  height: 100vh;
+  position: sticky;
+  top: 0;
 }
 
 .sidebar-head {
@@ -984,7 +1336,8 @@ watch(
   min-width: 0;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* 顶栏：右上角贴边 */
@@ -997,6 +1350,8 @@ watch(
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border-subtle);
   min-height: 3rem;
+  background: var(--surface);
+  z-index: 5;
 }
 
 .menu-btn {
@@ -1063,19 +1418,40 @@ watch(
   line-height: 1;
 }
 
-/* ----- Main ----- */
+/* ----- Main（对话滚动区域）----- */
 .main {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   justify-content: center;
-  padding: 0 1.5rem;
+  padding: 0 2rem;
+  min-height: 0; /* 重要：允许 flex 子项收缩 */
+}
+
+/* 全局滚动条样式 */
+.main::-webkit-scrollbar {
+  width: 8px;
+}
+
+.main::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+.main::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.main::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-muted);
 }
 
 .content {
   width: 100%;
-  max-width: 45rem;
+  max-width: 56rem;
   padding: 2rem 0 1.5rem;
+  margin: 0 auto;
 }
 
 .empty {
@@ -1267,7 +1643,7 @@ watch(
   padding: 0.75rem 1rem;
   margin: 0 1rem 0.5rem;
   border-radius: var(--radius-md);
-  max-width: 45rem;
+  max-width: 56rem;
   margin-left: auto;
   margin-right: auto;
 }
@@ -1335,8 +1711,10 @@ watch(
   flex-direction: column;
   align-items: center;
   border-top: 1px solid var(--border-subtle);
+  background: var(--bg);
   position: relative;
   transition: background 0.2s, border-color 0.2s;
+  z-index: 5;
 }
 
 .footer--dragover {
@@ -1389,7 +1767,7 @@ watch(
   align-items: flex-end;
   gap: 0.75rem;
   width: 100%;
-  max-width: 45rem;
+  max-width: 56rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1450,12 +1828,23 @@ watch(
 }
 
 .stop-btn {
-  background: var(--error);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
 }
 
 .stop-btn:hover {
-  background: #dc2626;
+  background: var(--accent-muted);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.stop-icon {
+  width: 0.875rem;
+  height: 0.875rem;
 }
 
 /* ----- 图片上传与预览 ----- */
@@ -1494,9 +1883,9 @@ watch(
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  max-width: 45rem;
-  width: 100%;
-  margin-bottom: 0.75rem;
+  padding: 0.5rem 0;
+  max-width: 56rem;
+  margin: 0 auto;
 }
 
 .uploaded-image-item {
@@ -1676,6 +2065,366 @@ watch(
   background: #dc2626;
 }
 
+/* ===== 新消息卡片样式 ===== */
+.message-card {
+  display: flex;
+  gap: 1rem;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  transition: box-shadow 0.15s;
+}
+
+.message-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.message-card--user {
+  background: linear-gradient(135deg, var(--user-bg) 0%, var(--surface) 100%);
+  border-color: var(--border);
+}
+
+.message-card--assistant {
+  background: var(--surface);
+  border-left: 3px solid var(--accent);
+}
+
+.message-card--streaming {
+  border-left-color: var(--accent);
+  animation: streamingPulse 2s ease-in-out infinite;
+}
+
+@keyframes streamingPulse {
+  0%, 100% { border-left-color: var(--accent); }
+  50% { border-left-color: var(--accent-hover); }
+}
+
+/* 头像 */
+.message-avatar {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+}
+
+.message-avatar--user {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+}
+
+.message-avatar--assistant {
+  background: transparent;
+}
+
+.avatar-icon {
+  line-height: 1;
+}
+
+/* 猫咪头像 */
+.avatar-cat {
+  width: 2rem;
+  height: 2rem;
+  color: var(--accent);
+}
+
+.avatar-cat--typing {
+  animation: catBounce 1s ease-in-out infinite;
+}
+
+@keyframes catBounce {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  25% { transform: translateY(-2px) rotate(-3deg); }
+  75% { transform: translateY(-2px) rotate(3deg); }
+}
+
+/* 消息内容区 */
+.message-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.message-role {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.message-model {
+  font-size: 0.75rem;
+  padding: 0.125rem 0.5rem;
+  background: var(--accent-muted);
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, monospace;
+}
+
+/* 打字指示器 */
+.typing-indicator {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* 消息正文 */
+.message-body {
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+}
+
+.message-body--user {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.message-text {
+  font-size: 0.9375rem;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.message-card--user .message-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-text--placeholder {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* 流式文本样式 */
+.streaming-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+}
+
+/* ===== 思考过程块 ===== */
+.thinking-block {
+  margin-bottom: 1rem;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, rgba(124, 179, 66, 0.08) 0%, rgba(104, 159, 56, 0.05) 100%);
+  border: 1px solid rgba(124, 179, 66, 0.25);
+  overflow: hidden;
+}
+
+.thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  transition: background 0.15s;
+}
+
+.thinking-toggle:hover {
+  background: rgba(124, 179, 66, 0.12);
+}
+
+.thinking-toggle--static {
+  cursor: default;
+}
+
+.thinking-toggle--static:hover {
+  background: transparent;
+}
+
+.thinking-icon {
+  font-size: 1rem;
+}
+
+.thinking-label {
+  font-weight: 500;
+}
+
+.thinking-arrow {
+  margin-left: auto;
+  font-size: 0.625rem;
+  transition: transform 0.2s;
+}
+
+.thinking-block--expanded .thinking-arrow {
+  transform: rotate(0);
+}
+
+.thinking-content {
+  padding: 0 1rem 1rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  border-top: 1px solid rgba(124, 179, 66, 0.2);
+}
+
+.thinking-content p {
+  margin: 0.5rem 0;
+}
+
+.thinking-content p:first-child {
+  margin-top: 0.75rem;
+}
+
+/* ===== 图片样式 ===== */
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.message-images--generated {
+  margin-top: 1rem;
+}
+
+.message-image {
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
+
+.message-image--user {
+  max-width: 200px;
+  max-height: 200px;
+}
+
+.message-image--generated {
+  max-width: 100%;
+  max-height: 400px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.message-image--generated:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.generated-image-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.image-actions {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.generated-image-wrap:hover .image-actions {
+  opacity: 1;
+}
+
+.image-action-btn {
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 0.875rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.image-action-btn:hover {
+  background: var(--accent);
+}
+
+/* ===== 滚动到底部按钮 ===== */
+.scroll-bottom-btn {
+  position: absolute;
+  right: 2rem;
+  bottom: 8rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.scroll-bottom-btn:hover {
+  background: var(--accent-muted);
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.scroll-bottom-btn svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* 淡入淡出动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+/* ===== 空状态改进 ===== */
+.empty-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.6;
+}
+
 /* ----- 响应式：移动端侧边栏抽屉 ----- */
 @media (max-width: 767px) {
   .sidebar {
@@ -1700,17 +2449,19 @@ watch(
     padding: 1.5rem 0 1rem;
   }
 
-  .block {
-    grid-template-columns: 3.5rem 1fr;
+  .message-card {
+    padding: 1rem;
     gap: 0.75rem;
-    padding: 1rem 0;
   }
 
-  .block--user {
-    margin-left: -0.5rem;
-    margin-right: -0.5rem;
-    padding-left: 0.5rem;
-    padding-right: 0.5rem;
+  .message-avatar {
+    width: 2rem;
+    height: 2rem;
+    font-size: 1rem;
+  }
+
+  .message-body {
+    padding: 0.75rem;
   }
 
   .empty {

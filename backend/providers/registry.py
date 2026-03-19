@@ -9,6 +9,7 @@ from .base import BaseProvider
 from .openai_compatible import OpenAICompatibleProvider
 from .gemini import GeminiProvider
 from .nano_banana import NanoBananaProvider
+from .taffy import TaffyProvider
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,10 @@ def init_registry(base_url: str, api_key: str, chat_path: str = "/v1/chat/comple
     """
     global _registry
     _registry = ProviderRegistry()
+    
+    # 注册塔菲酱提供商（内网限定，不需要 API key）
+    taffy_provider = TaffyProvider()
+    _registry.register(taffy_provider)
     
     # 注册 Nano Banana 提供商（图片生成）
     # 注意：必须先于 Gemini 注册，因为 Nano Banana 使用精确匹配，而 Gemini 使用前缀匹配

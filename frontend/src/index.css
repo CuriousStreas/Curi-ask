@@ -42,7 +42,7 @@
 [data-theme="light"] .hljs-class .hljs-title { color: #c18401; }
 [data-theme="light"] .hljs-deletion { color: #e45649; }
 
-/* 深色主题 */
+/* 深色主题 - 抹茶色 */
 :root,
 [data-theme="dark"] {
   --bg: #0a0a0a;
@@ -53,9 +53,9 @@
   --text: #fafafa;
   --text-secondary: #a1a1aa;
   --text-tertiary: #71717a;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-muted: rgba(59, 130, 246, 0.15);
+  --accent: #7cb342;
+  --accent-hover: #689f38;
+  --accent-muted: rgba(124, 179, 66, 0.15);
   --user-bg: rgba(255, 255, 255, 0.03);
   --assistant-bg: transparent;
   --error: #ef4444;
@@ -65,7 +65,7 @@
   --radius-lg: 16px;
 }
 
-/* 浅色主题 */
+/* 浅色主题 - 抹茶色 */
 [data-theme="light"] {
   --bg: #fafafa;
   --surface: #ffffff;
@@ -75,9 +75,9 @@
   --text: #171717;
   --text-secondary: #525252;
   --text-tertiary: #737373;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-muted: rgba(37, 99, 235, 0.08);
+  --accent: #689f38;
+  --accent-hover: #558b2f;
+  --accent-muted: rgba(104, 159, 56, 0.1);
   --user-bg: rgba(0, 0, 0, 0.03);
   --assistant-bg: transparent;
   --error: #dc2626;
