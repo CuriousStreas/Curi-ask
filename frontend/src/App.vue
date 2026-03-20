@@ -242,7 +242,7 @@
                   </span>
                 </div>
                 
-                <!-- 流式思考过程（使用纯文本渲染） -->
+                  <!-- 流式思考过程（节流 Markdown 渲染） -->
                 <div 
                   v-if="hasThinkingContent(streamingContent)" 
                   class="thinking-block"
@@ -258,16 +258,16 @@
                     <span class="thinking-arrow">{{ isStreamingThinking ? '▼' : '▶' }}</span>
                   </button>
                   <div v-show="isStreamingThinking" class="thinking-content">
-                    <div v-html="renderPlainText(getThinkingContent(streamingContent))"></div>
+                    <div class="markdown-body" v-html="streamingThinkingHtml"></div>
                   </div>
                 </div>
                 
-                <!-- 流式正文（使用纯文本渲染，提高性能） -->
+                <!-- 流式正文（节流 Markdown 渲染） -->
                 <div class="message-body">
                   <div 
-                    v-if="getMainContent(streamingContent)"
-                    class="message-text streaming-text"
-                    v-html="renderPlainText(getMainContent(streamingContent))"
+                    v-if="streamingMainHtml"
+                    class="message-text markdown-body"
+                    v-html="streamingMainHtml"
                   ></div>
                   <div v-else-if="!hasThinkingContent(streamingContent)" class="message-text message-text--placeholder">
                     正在思考...
@@ -562,6 +562,52 @@ const SCROLL_THROTTLE = 100; // 100ms 节流
 
 // 流式思考状态
 const isStreamingThinking = ref(true); // 流式时思考默认展开
+
+// 流式渲染缓存（节流 Markdown 渲染）
+const streamingThinkingHtml = ref('');
+const streamingMainHtml = ref('');
+let streamRenderTimer = null;
+
+// 启动流式渲染定时器（每 150ms 更新一次 Markdown）
+function startStreamRender() {
+  stopStreamRender();
+  streamRenderTimer = setInterval(() => {
+    if (streamingContent.value) {
+      streamingThinkingHtml.value = renderThinkingToHtml(streamingContent.value);
+      streamingMainHtml.value = renderMainToHtml(streamingContent.value);
+    }
+  }, 150);
+}
+
+// 停止流式渲染定时器并做最终渲染
+function stopStreamRender() {
+  if (streamRenderTimer) {
+    clearInterval(streamRenderTimer);
+    streamRenderTimer = null;
+  }
+}
+
+// 将思考内容渲染为 HTML（流式专用）
+function renderThinkingToHtml(content) {
+  const thinking = getThinkingContent(content);
+  if (!thinking) return '';
+  try {
+    return marked.parse(thinking);
+  } catch (e) {
+    return renderPlainText(thinking);
+  }
+}
+
+// 将正文内容渲染为 HTML（流式专用）
+function renderMainToHtml(content) {
+  const main = getMainContent(content);
+  if (!main) return '';
+  try {
+    return marked.parse(main);
+  } catch (e) {
+    return renderPlainText(main);
+  }
+}
 
 // 判断当前模型是否为图片生成模型
 function isImageModel() {
@@ -906,6 +952,7 @@ function toggleTheme() {
 }
 
 function stopStream() {
+  stopStreamRender();
   if (abortController.value) {
     abortController.value.abort();
     abortController.value = null;
@@ -982,7 +1029,12 @@ async function handleSubmit() {
   streamingContent.value = '';
   streamingModel.value = '';
   streamingImages.value = [];
+  streamingThinkingHtml.value = '';
+  streamingMainHtml.value = '';
   isStreamingThinking.value = true; // 新请求时思考默认展开
+  
+  // 启动流式 Markdown 渲染定时器
+  startStreamRender();
   
   // 创建 AbortController 用于停止流
   abortController.value = new AbortController();
@@ -1050,6 +1102,11 @@ async function handleSubmit() {
             }
             
             if (data.done) {
+              // 停止渲染定时器，做最终渲染
+              stopStreamRender();
+              streamingThinkingHtml.value = renderThinkingToHtml(streamingContent.value);
+              streamingMainHtml.value = renderMainToHtml(streamingContent.value);
+              
               // 流结束，折叠思考过程
               isStreamingThinking.value = false;
               
@@ -1115,6 +1172,7 @@ async function handleSubmit() {
       }
     }
   } finally {
+    stopStreamRender();
     loading.value = false;
     abortController.value = null;
   }
